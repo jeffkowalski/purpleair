@@ -1,0 +1,14 @@
+purpleair - read status from purpleair sensor and record to influxdb
+
+* Install
+bundle install
+* Scan
+Usage:
+  purpleair.rb record-status
+
+Options:
+      [--log], [--no-log]          # log output to ~/.log/.nest.log
+                                   # Default: true
+  -v, [--verbose], [--no-verbose]  # increase verbosity
+
+Record current usage data to database
