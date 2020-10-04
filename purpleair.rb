@@ -10,9 +10,10 @@ require 'json'
 require 'influxdb'
 
 LOGFILE = File.join(Dir.home, '.log', 'purpleair.log')
+SENSOR_ID = '59873'
 
 module Kernel
-  def with_rescue(exceptions, logger, retries: 5)
+  def with_rescue(exceptions, logger, retries: 5, nap: 0)
     try = 0
     begin
       yield try
@@ -21,6 +22,7 @@ module Kernel
       raise if try > retries
 
       logger.info "caught error #{e.class}, retrying (#{try}/#{retries})..."
+      sleep nap
       retry
     end
   end
@@ -57,7 +59,7 @@ class PurpleAir < Thor
     end
 
     def aqi_from_pm(pm25)
-      return '-' if pm25.nil? || pm25.nan? || pm25 > 1000
+      return -1 if pm25.nil? || pm25.nan? || pm25 > 1000
       return pm25 if pm25.negative?
       return calc_aqi(pm25, 500, 401, 500.0, 350.5) if pm25 > 350.5
       return calc_aqi(pm25, 400, 301, 350.4, 250.5) if pm25 > 250.5
@@ -66,8 +68,7 @@ class PurpleAir < Thor
       return calc_aqi(pm25, 150, 101,  55.4,  35.5) if pm25 >  35.5
       return calc_aqi(pm25, 100,  51,  35.4,  12.1) if pm25 >  12.1
       return calc_aqi(pm25,  50,   0,    12,     0) if pm25 >=    0
-
-      nil
+      -1
     end
   end
 
@@ -80,23 +81,44 @@ class PurpleAir < Thor
     setup_logger
 
     begin
-      meter = with_rescue([RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::Exceptions::OpenTimeout], @logger) do |_try|
+      meter = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::Exceptions::OpenTimeout], @logger) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
-          url: 'https://www.purpleair.com/json?show=59873'
+          url: "https://www.purpleair.com/json?show=#{SENSOR_ID}"
         )
         JSON.parse response
       end
-      @logger.info meter
+      @logger.debug meter
+
+      pm_1 = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::InternalServerError, RestClient::Exceptions::OpenTimeout], @logger, nap: 6) do |_try|
+        response = RestClient::Request.execute(
+          method: 'GET',
+          url: "https://www.purpleair.com/data.json?fetch=true&show=#{SENSOR_ID}&fields=pm_1"
+        )
+        @logger.debug response
+        response.sub! '"data":[],', '"data":[' # HACK: accommodate malformed string
+        response = JSON.parse response
+        # {"version":"7.0.19",
+        #  "fields":
+        #    ["ID","age","pm_1","conf","Type","Label","Lat","Lon","isOwner","Flags","CH"],
+        #  "data":[
+        #            [59873,1,90.4,100,0,"S. Peardale Dr.",37.897408,-122.14682,0,0,3]
+        #          ],
+        #  "count":1}
+        response['data'][0][response['fields'].index('pm_1')]
+      end
+
+      aqi = aqi_from_pm(pm_1)
+      @logger.debug "pm_1 = #{pm_1},  aqi=#{aqi_from_pm(pm_1)}"
 
       influxdb = options[:dry_run] ? nil : (InfluxDB::Client.new 'purpleair')
       reading = meter['results'].first
       tags = { id: reading['ID'] }
       timestamp = reading['LastSeen'].to_i
       data = [{ series: 'pm10_0_atm', values: { value: reading['pm10_0_atm'].to_f }, tags: tags, timestamp: timestamp },
-              { series: 'pm2_5_atm', values: { value: reading['pm2_5_atm'].to_f }, tags: tags, timestamp: timestamp },
-              { series: 'pm1_0_atm', values: { value: reading['pm1_0_atm'].to_f }, tags: tags, timestamp: timestamp },
-              { series: 'aqi', values: { value: aqi_from_pm(reading['pm2_5_atm'].to_f) }, tags: tags, timestamp: timestamp }]
+              { series: 'pm2_5_atm',  values: { value: reading['pm2_5_atm'].to_f },  tags: tags, timestamp: timestamp },
+              { series: 'pm1_0_atm',  values: { value: reading['pm1_0_atm'].to_f },  tags: tags, timestamp: timestamp },
+              { series: 'aqi', values: { value: aqi }, tags: tags, timestamp: timestamp }]
       influxdb.write_points data unless options[:dry_run]
     rescue StandardError => e
       @logger.error e
