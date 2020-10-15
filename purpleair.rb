@@ -90,6 +90,14 @@ class PurpleAir < Thor
       end
       @logger.debug meter
 
+      influxdb = options[:dry_run] ? nil : (InfluxDB::Client.new 'purpleair')
+      reading = meter['results'].first
+      tags = { id: reading['ID'] }
+      timestamp = reading['LastSeen'].to_i
+      data = [{ series: 'pm10_0_atm', values: { value: reading['pm10_0_atm'].to_f }, tags: tags, timestamp: timestamp },
+              { series: 'pm2_5_atm',  values: { value: reading['pm2_5_atm'].to_f },  tags: tags, timestamp: timestamp },
+              { series: 'pm1_0_atm',  values: { value: reading['pm1_0_atm'].to_f },  tags: tags, timestamp: timestamp }]
+
       pm_1 = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::InternalServerError, RestClient::Exceptions::OpenTimeout], @logger, nap: 6) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
@@ -106,8 +114,8 @@ class PurpleAir < Thor
           #            [59873,1,90.4,100,0,"S. Peardale Dr.",37.897408,-122.14682,0,0,3]
           #          ],
           #  "count":1}
-          json['data'][0][json['fields'].index('pm_1')]
-        rescue JSON::ParserError, NoMethodError => e
+          json['data'].nil? ? json['data'] : json['data'][0][json['fields'].index('pm_1')]
+        rescue JSON::ParserError => e
           @logger.warn "caught #{e.class.name} on\n#{response}"
           raise if retried
 
@@ -118,17 +126,12 @@ class PurpleAir < Thor
         end
       end
 
-      aqi = aqi_from_pm(pm_1)
-      @logger.debug "pm_1 = #{pm_1},  aqi=#{aqi_from_pm(pm_1)}"
+      unless pm_1.nil?
+        aqi = aqi_from_pm(pm_1)
+        @logger.debug "pm_1 = #{pm_1},  aqi=#{aqi_from_pm(pm_1)}"
+        data.push({ series: 'aqi', values: { value: aqi }, tags: tags, timestamp: timestamp })
+      end
 
-      influxdb = options[:dry_run] ? nil : (InfluxDB::Client.new 'purpleair')
-      reading = meter['results'].first
-      tags = { id: reading['ID'] }
-      timestamp = reading['LastSeen'].to_i
-      data = [{ series: 'pm10_0_atm', values: { value: reading['pm10_0_atm'].to_f }, tags: tags, timestamp: timestamp },
-              { series: 'pm2_5_atm',  values: { value: reading['pm2_5_atm'].to_f },  tags: tags, timestamp: timestamp },
-              { series: 'pm1_0_atm',  values: { value: reading['pm1_0_atm'].to_f },  tags: tags, timestamp: timestamp },
-              { series: 'aqi', values: { value: aqi }, tags: tags, timestamp: timestamp }]
       influxdb.write_points data unless options[:dry_run]
     rescue StandardError => e
       @logger.error e
