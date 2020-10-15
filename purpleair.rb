@@ -93,19 +93,29 @@ class PurpleAir < Thor
       pm_1 = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::InternalServerError, RestClient::Exceptions::OpenTimeout], @logger, nap: 6) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
-          url: "https://www.purpleair.com/data.json?fetch=true&show=#{SENSOR_ID}&fields=pm_1"
+          url: "https://www.purpleair.com/data.json?key=UGRT554JBQ7I7JUA&fetch=true&show=#{SENSOR_ID}&fields=pm_1"
         )
         @logger.debug response
-        response.sub! '"data":[],', '"data":[' # HACK: accommodate malformed string
-        response = JSON.parse response
-        # {"version":"7.0.19",
-        #  "fields":
-        #    ["ID","age","pm_1","conf","Type","Label","Lat","Lon","isOwner","Flags","CH"],
-        #  "data":[
-        #            [59873,1,90.4,100,0,"S. Peardale Dr.",37.897408,-122.14682,0,0,3]
-        #          ],
-        #  "count":1}
-        response['data'][0][response['fields'].index('pm_1')]
+        retried = false
+        begin
+          json = JSON.parse response
+          # {"version":"7.0.19",
+          #  "fields":
+          #    ["ID","age","pm_1","conf","Type","Label","Lat","Lon","isOwner","Flags","CH"],
+          #  "data":[
+          #            [59873,1,90.4,100,0,"S. Peardale Dr.",37.897408,-122.14682,0,0,3]
+          #          ],
+          #  "count":1}
+          json['data'][0][json['fields'].index('pm_1')]
+        rescue JSON::ParserError, NoMethodError => e
+          @logger.warn "caught #{e.class.name} on\n#{response}"
+          raise if retried
+
+          response.sub! '"data":[],', '"data":[' # HACK: accommodate malformed string
+          @logger.warn 'retrying'
+          retried = true
+          retry
+        end
       end
 
       aqi = aqi_from_pm(pm_1)
