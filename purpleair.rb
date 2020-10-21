@@ -119,7 +119,9 @@ class PurpleAir < Thor
           @logger.warn "caught #{e.class.name} on\n#{response}"
           raise if retried
 
-          response.sub! '"data":[],', '"data":[' # HACK: accommodate malformed string
+          # HACK: accommodate malformed string
+          response.sub! '"data":[],', '"data":['
+          response.sub!(/[^\]\n]\],\n"count"/, %(]],\n"count"))
           @logger.warn 'retrying'
           retried = true
           retry
