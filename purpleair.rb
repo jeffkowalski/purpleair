@@ -121,7 +121,7 @@ class PurpleAir < Thor
 
           # HACK: accommodate malformed string
           response.sub! '"data":[],', '"data":['
-          response.sub!(/[^\]\n]\],\n"count"/, %(]],\n"count"))
+          response.sub!(/([^\]\n]\])(,\n"count")/, %q(\1]\2))
           @logger.warn 'retrying'
           retried = true
           retry
