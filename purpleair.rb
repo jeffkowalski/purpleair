@@ -81,7 +81,7 @@ class PurpleAir < Thor
     setup_logger
 
     begin
-      meter = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::Exceptions::OpenTimeout], @logger) do |_try|
+      meter = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::InternalServerError, RestClient::Exceptions::OpenTimeout], @logger) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
           url: "https://www.purpleair.com/json?show=#{SENSOR_ID}"
