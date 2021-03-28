@@ -9,7 +9,7 @@ require 'json'
 require 'influxdb'
 
 LOGFILE = File.join(Dir.home, '.log', 'purpleair.log')
-SENSOR_ID = '59873'
+SENSOR_ID = '81361'
 
 module Kernel
   def with_rescue(exceptions, logger, retries: 5, nap: 0)
