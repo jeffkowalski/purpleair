@@ -1,5 +1,4 @@
 #!/usr/bin/env ruby
-# coding: utf-8
 # frozen_string_literal: true
 
 require 'thor'
@@ -45,7 +44,7 @@ class PurpleAir < Thor
     def setup_logger
       redirect_output if options[:log]
 
-      @logger = Logger.new STDOUT
+      @logger = Logger.new $stdout
       @logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
       @logger.info 'starting'
     end
@@ -68,6 +67,7 @@ class PurpleAir < Thor
       return calc_aqi(pm25, 150, 101,  55.4,  35.5) if pm25 >  35.5
       return calc_aqi(pm25, 100,  51,  35.4,  12.1) if pm25 >  12.1
       return calc_aqi(pm25,  50,   0,    12,     0) if pm25 >=    0
+
       -1
     end
   end
