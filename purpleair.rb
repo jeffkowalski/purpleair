@@ -103,9 +103,9 @@ class PurpleAir < Thor
           method: 'GET',
           url: "https://www.purpleair.com/data.json?key=UGRT554JBQ7I7JUA&fetch=true&show=#{SENSOR_ID}&fields=pm_1"
         )
-        @logger.debug response
         retried = false
         begin
+          @logger.debug response
           json = JSON.parse response
           # {"version":"7.0.19",
           #  "fields":
