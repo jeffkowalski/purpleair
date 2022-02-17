@@ -1,54 +1,14 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'thor'
-require 'fileutils'
-require 'logger'
-require 'rest-client'
-require 'json'
-require 'influxdb'
+require 'rubygems'
+require 'bundler/setup'
+Bundler.require(:default)
 
-LOGFILE = File.join(Dir.home, '.log', 'purpleair.log')
 SENSOR_ID = '112028'
 
-module Kernel
-  def with_rescue(exceptions, logger, retries: 5, nap: 0)
-    try = 0
-    begin
-      yield try
-    rescue *exceptions => e
-      try += 1
-      raise if try > retries
-
-      logger.info "caught error #{e.class}, retrying (#{try}/#{retries})..."
-      sleep nap
-      retry
-    end
-  end
-end
-
-class PurpleAir < Thor
+class PurpleAir < RecorderBotBase
   no_commands do
-    def redirect_output
-      unless LOGFILE == 'STDOUT'
-        logfile = File.expand_path(LOGFILE)
-        FileUtils.mkdir_p(File.dirname(logfile), mode: 0o755)
-        FileUtils.touch logfile
-        File.chmod 0o644, logfile
-        $stdout.reopen logfile, 'a'
-      end
-      $stderr.reopen $stdout
-      $stdout.sync = $stderr.sync = true
-    end
-
-    def setup_logger
-      redirect_output if options[:log]
-
-      @logger = Logger.new $stdout
-      @logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
-      @logger.info 'starting'
-    end
-
     # from https://docs.google.com/document/d/15ijz94dXJ-YAZLi9iZ_RaBwrZ4KtYeCy08goGBwnbCU/edit
     def calc_aqi(cp0, ih0, il0, bph, bpl)
       a = (ih0 - il0)
@@ -72,15 +32,8 @@ class PurpleAir < Thor
     end
   end
 
-  class_option :log,     type: :boolean, default: true, desc: "log output to #{LOGFILE}"
-  class_option :verbose, type: :boolean, aliases: '-v', desc: 'increase verbosity'
-
-  desc 'record-status', 'record the current reading to database'
-  method_option :dry_run, type: :boolean, aliases: '-n', desc: "don't log to database"
-  def record_status
-    setup_logger
-
-    begin
+  no_commands do
+    def main
       meter = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::InternalServerError, RestClient::Exceptions::OpenTimeout], @logger) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
@@ -135,8 +88,6 @@ class PurpleAir < Thor
       end
 
       influxdb.write_points data unless options[:dry_run]
-    rescue StandardError => e
-      @logger.error e
     end
   end
 end
