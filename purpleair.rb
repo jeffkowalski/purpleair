@@ -5,7 +5,8 @@ require 'rubygems'
 require 'bundler/setup'
 Bundler.require(:default)
 
-SENSOR_ID = '112028'
+#SENSOR_ID = '112028'
+SENSOR_ID = '60801'
 
 class PurpleAir < RecorderBotBase
   no_commands do
