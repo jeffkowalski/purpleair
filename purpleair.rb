@@ -5,7 +5,7 @@ require 'rubygems'
 require 'bundler/setup'
 Bundler.require(:default)
 
-#SENSOR_ID = '112028'
+# SENSOR_ID = '112028'
 SENSOR_ID = '60801'
 
 class PurpleAir < RecorderBotBase
@@ -35,7 +35,15 @@ class PurpleAir < RecorderBotBase
 
   no_commands do
     def main
-      meter = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::InternalServerError, RestClient::Exceptions::OpenTimeout], @logger) do |_try|
+      soft_faults = [
+        RestClient::BadGateway,
+        RestClient::Exceptions::OpenTimeout,
+        RestClient::GatewayTimeout,
+        RestClient::InternalServerError,
+        RestClient::TooManyRequests
+      ]
+
+      meter = with_rescue(soft_faults, @logger) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
           url: "https://www.purpleair.com/json?show=#{SENSOR_ID}"
@@ -52,7 +60,7 @@ class PurpleAir < RecorderBotBase
               { series: 'pm2_5_atm',  values: { value: reading['pm2_5_atm'].to_f },  tags: tags, timestamp: timestamp },
               { series: 'pm1_0_atm',  values: { value: reading['pm1_0_atm'].to_f },  tags: tags, timestamp: timestamp }]
 
-      pm_1 = with_rescue([RestClient::TooManyRequests, RestClient::BadGateway, RestClient::GatewayTimeout, RestClient::InternalServerError, RestClient::Exceptions::OpenTimeout], @logger, nap: 6) do |_try|
+      pm_1 = with_rescue(soft_faults, @logger, nap: 6) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
           url: "https://www.purpleair.com/data.json?key=UGRT554JBQ7I7JUA&fetch=true&show=#{SENSOR_ID}&fields=pm_1"
