@@ -5,8 +5,7 @@ require 'rubygems'
 require 'bundler/setup'
 Bundler.require(:default)
 
-# SENSOR_ID = '112028'
-SENSOR_ID = '60801'
+# https://community.purpleair.com/t/making-api-calls-with-the-purpleair-api/180
 
 class PurpleAir < RecorderBotBase
   no_commands do
@@ -35,6 +34,8 @@ class PurpleAir < RecorderBotBase
 
   no_commands do
     def main
+      credentials = load_credentials
+
       soft_faults = [
         RestClient::BadGateway,
         RestClient::Exceptions::OpenTimeout,
@@ -43,58 +44,27 @@ class PurpleAir < RecorderBotBase
         RestClient::TooManyRequests
       ]
 
+      influxdb = options[:dry_run] ? nil : (InfluxDB::Client.new 'purpleair')
+
       meter = with_rescue(soft_faults, @logger) do |_try|
         response = RestClient::Request.execute(
           method: 'GET',
-          url: "https://www.purpleair.com/json?show=#{SENSOR_ID}"
+          url: "https://api.purpleair.com/v1/sensors/#{credentials[:sensor_id]}",
+          headers: { x_api_key: credentials[:read_key] }
         )
         JSON.parse response
       end
       @logger.debug meter
 
-      influxdb = options[:dry_run] ? nil : (InfluxDB::Client.new 'purpleair')
-      reading = meter['results'].first
-      tags = { id: reading['ID'] }
-      timestamp = reading['LastSeen'].to_i
-      data = [{ series: 'pm10_0_atm', values: { value: reading['pm10_0_atm'].to_f }, tags: tags, timestamp: timestamp },
-              { series: 'pm2_5_atm',  values: { value: reading['pm2_5_atm'].to_f },  tags: tags, timestamp: timestamp },
-              { series: 'pm1_0_atm',  values: { value: reading['pm1_0_atm'].to_f },  tags: tags, timestamp: timestamp }]
-
-      pm_1 = with_rescue(soft_faults, @logger, nap: 6) do |_try|
-        response = RestClient::Request.execute(
-          method: 'GET',
-          url: "https://www.purpleair.com/data.json?key=UGRT554JBQ7I7JUA&fetch=true&show=#{SENSOR_ID}&fields=pm_1"
-        )
-        retried = false
-        begin
-          @logger.debug response
-          json = JSON.parse response
-          # {"version":"7.0.19",
-          #  "fields":
-          #    ["ID","age","pm_1","conf","Type","Label","Lat","Lon","isOwner","Flags","CH"],
-          #  "data":[
-          #            [59873,1,90.4,100,0,"S. Peardale Dr.",37.897408,-122.14682,0,0,3]
-          #          ],
-          #  "count":1}
-          json['data'].nil? ? json['data'] : json['data'][0][json['fields'].index('pm_1')]
-        rescue JSON::ParserError => e
-          @logger.warn "caught #{e.class.name} on\n#{response}"
-          raise if retried
-
-          # HACK: accommodate malformed string
-          response.sub! '"data":[],', '"data":['
-          response.sub!(/([^\]\n]\])(,\n"count")/, %q(\1]\2))
-          @logger.warn 'retrying'
-          retried = true
-          retry
-        end
-      end
-
-      unless pm_1.nil?
-        aqi = aqi_from_pm(pm_1)
-        @logger.debug "pm_1 = #{pm_1},  aqi=#{aqi_from_pm(pm_1)}"
-        data.push({ series: 'aqi', values: { value: aqi }, tags: tags, timestamp: timestamp })
-      end
+      reading = meter['sensor']
+      tags = { id: reading['sensor_index'] }
+      timestamp = reading['last_seen'].to_i
+      aqi = aqi_from_pm(reading['stats_a']['pm2.5_10minute'].to_f)
+      data = [{ series: 'pm10_0_atm', values: { value: reading['pm10.0_atm'].to_f }, tags: tags, timestamp: timestamp },
+              { series: 'pm2_5_atm',  values: { value: reading['pm2.5_atm'].to_f },  tags: tags, timestamp: timestamp },
+              { series: 'pm1_0_atm',  values: { value: reading['pm1.0_atm'].to_f },  tags: tags, timestamp: timestamp },
+              { series: 'aqi',        values: { value: aqi },                        tags: tags, timestamp: timestamp }]
+      @logger.debug data
 
       influxdb.write_points data unless options[:dry_run]
     end
